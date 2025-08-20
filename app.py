@@ -1,6 +1,6 @@
 # app.py
-# Agente MCP + ADK — Explicaciones por sección + Sidebar dinámico de destinatarios
-# UI oscura, full-width, filtros globales; acciones simuladas con toasts y bitácora.
+# Agente MCP + ADK — KPIs con explicación por sección + Animación LLM + Jira + selector de DB
+# Tema oscuro, full-width, acciones simuladas con toasts y bitácora.
 
 import streamlit as st
 import pandas as pd
@@ -8,13 +8,14 @@ import numpy as np
 from datetime import datetime, date, time as dt_time, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
+import time as pytime
 
 # =========================
 # CONFIG & THEME
 # =========================
 st.set_page_config(page_title="Agente MCP + ADK — Enterprise", layout="wide", page_icon="🧠")
 
-# Branding (edita a tu gusto)
+# Branding
 BRAND_NAME = "Atlas Data Suite"
 BRAND_AREA = "Operaciones & Comercial"
 PRIMARY = "#7C3AED"   # morado
@@ -26,8 +27,8 @@ TEXT = "#F5F7FA"
 MUTED = "#A7B0BE"
 LOGO_URL = ""  # opcional
 
-px_defaults = px.defaults
-px_defaults.template = "plotly_dark"
+px = px  # (alias de tranquilidad)
+px.defaults.template = "plotly_dark"
 
 st.markdown(f"""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
@@ -58,6 +59,7 @@ hr.section{{ border:none; height:1px; background:linear-gradient(90deg,{ACCENT},
 }}
 .stButton > button {{ background:{PRIMARY}; color:#ffffff; font-weight:900; border-radius:10px; border:none; font-size:18px; }}
 .explain {{ margin-top:10px; border-left: 3px solid {ACCENT}; padding:10px 12px; background:#101623; border-radius:10px; }}
+.explain h4 {{ margin:0 0 6px 0; font-size:1rem; color:{TEXT}; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -75,14 +77,15 @@ def init_state():
     if "chat_email" not in st.session_state: st.session_state.chat_email = []
     if "chat_whatsapp" not in st.session_state: st.session_state.chat_whatsapp = []
     if "activity_log" not in st.session_state: st.session_state.activity_log = []
-
-init_state()
+    if "llm_anim" not in st.session_state: st.session_state.llm_anim = True  # animación on/off
 
 def log(evt:str):
     st.session_state.activity_log.append({"ts": datetime.now().strftime("%H:%M:%S"), "event": evt})
 
+init_state()
+
 # =========================
-# HELPERS (acciones simuladas)
+# HELPERS (acciones simuladas + typewriter)
 # =========================
 def schedule_meeting(title:str, d:date, t:dt_time):
     when = datetime.combine(d, t)
@@ -90,10 +93,11 @@ def schedule_meeting(title:str, d:date, t:dt_time):
     st.toast(f"Google Calendar: '{title}' — {when.strftime('%d/%m/%Y %H:%M')}")
     log(f"Calendar: {title} @ {when.strftime('%d/%m %H:%M')}")
 
-def assign_sdac(task:str):
-    asg_id = f"SDAC-{np.random.randint(1000, 9999)}"
-    st.toast(f"SDAC: asignación {asg_id} — {task}")
-    log(f"SDAC: {asg_id} — {task}")
+def create_jira_issue(summary:str):
+    key = f"PROD-{np.random.randint(300,499)}"
+    st.toast(f"Jira: ticket creado {key} — {summary}")
+    log(f"Jira: {key} — {summary}")
+    return key
 
 def send_slack(channel:str, text:str):
     st.toast(f"Slack: #{channel} — enviado")
@@ -108,6 +112,18 @@ def send_email(frm:str, to:str, subject:str, body:str):
     st.session_state.chat_email.append({"ts": datetime.now().strftime("%H:%M"), "from": frm, "to": to, "subject": subject, "body": body})
     st.toast(f"Correo a {to}: {subject}")
     log(f"Mail a {to}: {subject}")
+
+def typewriter(md_text:str, speed:float=0.01):
+    """Escribe markdown con animación, carácter por carácter."""
+    placeholder = st.empty()
+    if not st.session_state.llm_anim:
+        placeholder.markdown(md_text, unsafe_allow_html=True)
+        return
+    acc = ""
+    for ch in md_text:
+        acc += ch
+        placeholder.markdown(acc, unsafe_allow_html=True)
+        pytime.sleep(speed)
 
 # =========================
 # DATA SYNTH (inventarios + serie)
@@ -177,11 +193,16 @@ with right:
 st.markdown('<hr class="section"/>', unsafe_allow_html=True)
 
 # =========================
-# SIDEBAR (AHORA DINÁMICO: destinatarios + plantillas)
+# SIDEBAR (dinámico: destinatarios, plantillas, DB y animación)
 # =========================
 with st.sidebar:
-    st.markdown("### ⚙️ Acciones rápidas")
-    # Destinatarios / personalización
+    st.markdown("### ⚙️ Acciones y configuración")
+    # DB selector
+    db_engine = st.selectbox("Motor de datos", ["Postgres", "SQL Server", "Spark"], index=0)
+    # Animación LLM
+    st.session_state.llm_anim = st.toggle("Animar explicaciones LLM", value=st.session_state.llm_anim)
+
+    st.markdown("---")
     st.caption("Destinatarios y plantillas")
     email_to = st.text_input("Correo destino", value="direccion@empresa.mx")
     slack_channel = st.text_input("Canal Slack (sin #)", value="logistica")
@@ -192,7 +213,7 @@ with st.sidebar:
         "Comercial: campañas y disponibilidad"
     ])
     if plantilla == "Ejecutivo: resumen + próximas acciones":
-        default_msg = "Resumen ejecutivo: SKUs críticos priorizados; junta programada; acciones en SDAC y notificaciones enviadas."
+        default_msg = "Resumen ejecutivo: SKUs críticos priorizados; junta programada; ticket en Jira y notificaciones enviadas."
     elif plantilla == "Operaciones: reabasto y cobertura":
         default_msg = "Operaciones: reabasto crítico asignado; monitoreo de cobertura diario; validar tiempos de entrega."
     else:
@@ -213,8 +234,8 @@ with st.sidebar:
         if st.button("🟢 Enviar WhatsApp"):
             send_whatsapp(wa_to, msg_text)
     with colD:
-        if st.button("🧾 Crear SDAC (reabasto)"):
-            assign_sdac("Reabasto crítico — priorización por brecha y cobertura")
+        if st.button("🧾 Crear ticket en Jira"):
+            create_jira_issue("Reabasto crítico — priorización por brecha y cobertura")
 
     st.markdown("---")
     st.caption("Filtros inventario")
@@ -233,43 +254,53 @@ inv_ts_view = inv_ts[(inv_ts["date"] >= cut) & (inv_ts["region"].isin(f_region) 
 # =========================
 # FUNCIONES DE EXPLICACIÓN (por sección)
 # =========================
-def explain_trend(ts_df: pd.DataFrame, regions_sel):
-    if ts_df.empty:
-        return "No hay datos en la ventana seleccionada."
-    change = (ts_df["total_stock"].iloc[-1] - ts_df["total_stock"].iloc[0]) / max(1, ts_df["total_stock"].iloc[0]) * 100
-    region_txt = ", ".join(regions_sel) if regions_sel else "todas las regiones"
-    direction = "alza" if change >= 0 else "baja"
-    return (f"**Tendencia:** el stock total para {region_txt} muestra una variación de **{change:.1f}%** "
-            f"en la ventana de **{horizon_days} días**, con sesgo a la **{direction}**. "
-            "Sugerencia: anticipar reabasto previo a picos semanales y validar lead times.")
-
-def explain_heatmap(hm_df: pd.DataFrame):
-    if hm_df.empty:
-        return "Sin brechas de reabasto en la combinación categoría–región actual."
-    top = hm_df.sort_values("gap_qty", ascending=False).head(1).iloc[0]
-    return (f"**Brecha concentrada:** mayor gap en **{top['category']}** para **{top['region']}**. "
-            "Priorizar asignaciones en esa intersección y ajustar puntos de pedido.")
-
-def explain_treemap(by_cat_df: pd.DataFrame):
-    if by_cat_df.empty:
-        return "No hay categorías con brecha para mostrar."
-    leaders = by_cat_df.head(3)["category"].tolist()
-    return (f"**Top categorías con brecha:** {', '.join(leaders)}. "
-            "Recom: revisar surtido, cobertura objetivo y elasticidad de demanda por categoría.")
-
-def explain_table(inv_df: pd.DataFrame):
+def kpi_explain(inv_df: pd.DataFrame):
     if inv_df.empty:
-        return "No hay SKUs para revisar con los filtros actuales."
+        return "**Explicación del LLM:** Sin datos para KPIs con los filtros actuales."
     below = int(inv_df["below_reorder"].sum())
     cover = inv_df["days_cover"].mean()
-    return (f"**Estado de SKUs:** {below} elementos por debajo del punto de pedido; "
-            f"cobertura promedio **{cover:.1f} días**. Acciones: reabasto dirigido y ajuste de reorder points.")
+    region_txt = ", ".join(sorted(inv_df["region"].unique()))
+    cat_txt = ", ".join(sorted(inv_df["category"].unique()))
+    return (f"**Explicación del LLM:** El sistema **{db_engine}** reporta **{below} SKUs** por debajo del punto de pedido "
+            f"con **{cover:.1f} días** de cobertura promedio. Regiones: _{region_txt or 'todas'}_; Categorías: _{cat_txt or 'todas'}_. "
+            "Recomendación: priorizar reabasto en los SKUs con menor cobertura y revisar parámetros de reorder.")
+
+def table_explain(inv_df: pd.DataFrame):
+    if inv_df.empty:
+        return "**Explicación del LLM:** No hay SKUs coincidentes bajo los filtros."
+    worst = inv_df.sort_values("days_cover").head(3)[["sku","region","category","days_cover"]]
+    lines = "; ".join([f"{r.sku} ({r.region}/{r.category}: {r.days_cover} días)" for r in worst.itertuples()])
+    return (f"**Explicación del LLM:** Top críticos por menor cobertura → {lines}. "
+            "Acción: crear ticket en Jira para reabasto dirigido y notificar a logística en Slack.")
+
+def trend_explain(ts_df: pd.DataFrame, regions_sel):
+    if ts_df.empty:
+        return "**Explicación del LLM:** Sin serie para la ventana seleccionada."
+    change = (ts_df['total_stock'].iloc[-1] - ts_df['total_stock'].iloc[0]) / max(1, ts_df['total_stock'].iloc[0]) * 100
+    region_txt = ", ".join(regions_sel) if regions_sel else "todas las regiones"
+    direction = "alza" if change >= 0 else "baja"
+    return (f"**Explicación del LLM:** En **{region_txt}**, el stock total varió **{change:.1f}%** en **{horizon_days} días**, "
+            f"con sesgo a la **{direction}**. Sugerencia: ajustar frecuencia de reabasto previo a picos semanales.")
+
+def heat_explain(hm_df: pd.DataFrame):
+    if hm_df.empty:
+        return "**Explicación del LLM:** No se observan brechas en la matriz categoría–región."
+    top = hm_df.sort_values("gap_qty", ascending=False).head(1).iloc[0]
+    return (f"**Explicación del LLM:** La mayor brecha está en **{top['category']}** para **{top['region']}**. "
+            "Prioriza asignaciones y revisa lead time de proveedores.")
+
+def tree_explain(by_cat_df: pd.DataFrame):
+    if by_cat_df.empty:
+        return "**Explicación del LLM:** Sin brechas agregadas por categoría."
+    leaders = by_cat_df.head(3)["category"].tolist()
+    return (f"**Explicación del LLM:** Categorías con mayor necesidad de reabasto: **{', '.join(leaders)}**. "
+            "Sugerencia: revisar elasticidad de demanda y cobertura objetivo.")
 
 # =========================
 # TABS
 # =========================
 tab_agenda, tab_inv, tab_insights, tab_msgs, tab_log = st.tabs(
-    ["📅 Agenda", "📦 Inventarios (SQL Server)", "📊 Insights", "💬 Mensajería", "🗂️ Bitácora"]
+    ["📅 Agenda", "📦 Inventarios (DB)", "📊 Insights", "💬 Mensajería", "🗂️ Bitácora"]
 )
 
 # -------- Agenda
@@ -297,11 +328,11 @@ with tab_agenda:
         else:
             st.info("Sin eventos programados.")
 
-# -------- Inventarios (tabla + explicación local)
+# -------- Inventarios (KPIs + tabla con explicación LLM y animación)
 with tab_inv:
     i1, i2 = st.columns([1.6, 2.4], gap="large")
     with i1:
-        st.markdown('<div class="section-title">Resumen</div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="section-title">Resumen ({db_engine})</div>', unsafe_allow_html=True)
         below = int(inv_view["below_reorder"].sum())
         pct_below = 100 * below / max(1, len(inv_view))
         avg_cover = inv_view["days_cover"].mean()
@@ -309,19 +340,28 @@ with tab_inv:
         k1.markdown(f'<div class="kpi-card"><div class="kpi-title">SKUs bajo punto de pedido</div><div class="kpi-value">{below:,}</div><div class="kpi-sub">{pct_below:.1f}% del total</div></div>', unsafe_allow_html=True)
         k2.markdown(f'<div class="kpi-card"><div class="kpi-title">Cobertura prom.</div><div class="kpi-value">{avg_cover:.1f} días</div><div class="kpi-sub">days of cover</div></div>', unsafe_allow_html=True)
         k3.markdown(f'<div class="kpi-card"><div class="kpi-title">Artefactos</div><div class="kpi-value">CSV / Gráficos</div><div class="kpi-sub">exportables</div></div>', unsafe_allow_html=True)
+        # --- Explicación LLM (KPIs)
+        st.markdown('<div class="explain"><h4>Explicación del LLM</h4>', unsafe_allow_html=True)
+        typewriter(kpi_explain(inv_view) + "</div>")
         st.markdown('<hr class="section"/>', unsafe_allow_html=True)
         st.markdown("**Acciones operativas**")
-        if st.button("🧾 Asignar logística (SDAC) — críticos"):
-            assign_sdac("Reabasto críticos: priorizar CD/tiendas para top SKUs")
-        st.download_button("📥 Exportar inventario (CSV)", data=inv_view.to_csv(index=False).encode("utf-8"),
-                           file_name="inventario_filtrado.csv")
+        colj1, colj2 = st.columns(2, gap="large")
+        with colj1:
+            if st.button("🧾 Crear ticket en Jira (reabasto críticos)"):
+                key = create_jira_issue("Reabasto críticos — priorizar CD/tiendas para top SKUs")
+                send_slack(slack_channel, f"Creado ticket {key} para reabasto críticos.")
+        with colj2:
+            st.download_button("📥 Exportar inventario (CSV)", data=inv_view.to_csv(index=False).encode("utf-8"),
+                               file_name=f"inventario_{db_engine.lower()}.csv")
     with i2:
         st.markdown('<div class="section-title">Detalle de inventario</div>', unsafe_allow_html=True)
         st.dataframe(inv_view[["sku","category","region","stock","reorder_point","daily_demand","days_cover"]],
                      hide_index=True, use_container_width=True)
-        st.markdown(f'<div class="explain">{explain_table(inv_view)}</div>', unsafe_allow_html=True)
+        # --- Explicación LLM (Tabla)
+        st.markdown('<div class="explain"><h4>Explicación del LLM</h4>', unsafe_allow_html=True)
+        typewriter(table_explain(inv_view) + "</div>")
 
-# -------- Insights (3 visuales; cada uno con explicación local justo debajo)
+# -------- Insights (cada gráfico con su explicación LLM animada)
 with tab_insights:
     st.markdown('<div class="section-title">Tendencias y focos</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2.2, 1.5, 1.3], gap="large")
@@ -332,7 +372,9 @@ with tab_insights:
     fig_ts.update_traces(line=dict(width=3))
     fig_ts.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10))
     c1.plotly_chart(fig_ts, use_container_width=True)
-    c1.markdown(f'<div class="explain">{explain_trend(ts, f_region)}</div>', unsafe_allow_html=True)
+    with c1:
+        st.markdown('<div class="explain"><h4>Explicación del LLM</h4>', unsafe_allow_html=True)
+        typewriter(trend_explain(ts, f_region) + "</div>")
 
     # Heatmap cat-reg
     inv_h = inv_view.copy()
@@ -341,16 +383,20 @@ with tab_insights:
     fig_hm = px.density_heatmap(heat, x="region", y="category", z="gap_qty", color_continuous_scale="Turbo")
     fig_hm.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10))
     c2.plotly_chart(fig_hm, use_container_width=True)
-    c2.markdown(f'<div class="explain">{explain_heatmap(heat)}</div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="explain"><h4>Explicación del LLM</h4>', unsafe_allow_html=True)
+        typewriter(heat_explain(heat) + "</div>")
 
     # Treemap por categoría
     by_cat = inv_h.groupby("category", as_index=False)["gap_qty"].sum().sort_values("gap_qty", ascending=False)
     fig_tree = px.treemap(by_cat, path=["category"], values="gap_qty", color="gap_qty", color_continuous_scale="Magma")
     fig_tree.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10))
     c3.plotly_chart(fig_tree, use_container_width=True)
-    c3.markdown(f'<div class="explain">{explain_treemap(by_cat)}</div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown('<div class="explain"><h4>Explicación del LLM</h4>', unsafe_allow_html=True)
+        typewriter(tree_explain(by_cat) + "</div>")
 
-# -------- Mensajería (envío + historial)
+# -------- Mensajería
 with tab_msgs:
     st.markdown('<div class="section-title">Mensajes enviados desde esta sesión</div>', unsafe_allow_html=True)
     colm1, colm2 = st.columns(2, gap="large")
