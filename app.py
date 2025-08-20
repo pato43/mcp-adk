@@ -1,6 +1,6 @@
 # app.py
-# Agente MCP + ADK — Orquestación Empresarial (Agenda, Inventarios, Mensajería, Insights, Explicaciones LLM)
-# UI oscura, full-width, intuitiva. Acciones simuladas con toasts + bitácora.
+# Agente MCP + ADK — Explicaciones por sección + Sidebar dinámico de destinatarios
+# UI oscura, full-width, filtros globales; acciones simuladas con toasts y bitácora.
 
 import streamlit as st
 import pandas as pd
@@ -8,7 +8,6 @@ import numpy as np
 from datetime import datetime, date, time as dt_time, timedelta
 import plotly.express as px
 import plotly.graph_objects as go
-import time as pytime
 
 # =========================
 # CONFIG & THEME
@@ -27,7 +26,8 @@ TEXT = "#F5F7FA"
 MUTED = "#A7B0BE"
 LOGO_URL = ""  # opcional
 
-px.defaults.template = "plotly_dark"
+px_defaults = px.defaults
+px_defaults.template = "plotly_dark"
 
 st.markdown(f"""
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800;900&display=swap" rel="stylesheet">
@@ -57,6 +57,7 @@ hr.section{{ border:none; height:1px; background:linear-gradient(90deg,{ACCENT},
   background:#0F1420 !important; color:{TEXT} !important; border:1px solid #20283A !important; border-radius:10px; font-size:18px;
 }}
 .stButton > button {{ background:{PRIMARY}; color:#ffffff; font-weight:900; border-radius:10px; border:none; font-size:18px; }}
+.explain {{ margin-top:10px; border-left: 3px solid {ACCENT}; padding:10px 12px; background:#101623; border-radius:10px; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -73,15 +74,12 @@ def init_state():
         ]
     if "chat_email" not in st.session_state: st.session_state.chat_email = []
     if "chat_whatsapp" not in st.session_state: st.session_state.chat_whatsapp = []
-    if "notes" not in st.session_state: st.session_state.notes = []
     if "activity_log" not in st.session_state: st.session_state.activity_log = []
-    if "started" not in st.session_state: st.session_state.started = False
-    if "global_role" not in st.session_state: st.session_state.global_role = "Operaciones & Logística"
+
+init_state()
 
 def log(evt:str):
     st.session_state.activity_log.append({"ts": datetime.now().strftime("%H:%M:%S"), "event": evt})
-
-init_state()
 
 # =========================
 # HELPERS (acciones simuladas)
@@ -94,21 +92,21 @@ def schedule_meeting(title:str, d:date, t:dt_time):
 
 def assign_sdac(task:str):
     asg_id = f"SDAC-{np.random.randint(1000, 9999)}"
-    st.toast(f"SDAC: asignación creada {asg_id} — {task}")
+    st.toast(f"SDAC: asignación {asg_id} — {task}")
     log(f"SDAC: {asg_id} — {task}")
 
 def send_slack(channel:str, text:str):
-    st.toast(f"Slack: #{channel} — {text}")
+    st.toast(f"Slack: #{channel} — enviado")
     log(f"Slack #{channel}: {text}")
 
 def send_whatsapp(to:str, text:str):
     st.session_state.chat_whatsapp.append({"ts": datetime.now().strftime("%H:%M"), "to": to, "text": text})
-    st.toast(f"WhatsApp: a {to}")
+    st.toast(f"WhatsApp a {to}: enviado")
     log(f"WhatsApp a {to}: {text[:60]}")
 
 def send_email(frm:str, to:str, subject:str, body:str):
     st.session_state.chat_email.append({"ts": datetime.now().strftime("%H:%M"), "from": frm, "to": to, "subject": subject, "body": body})
-    st.toast(f"Correo: {to} — {subject}")
+    st.toast(f"Correo a {to}: {subject}")
     log(f"Mail a {to}: {subject}")
 
 # =========================
@@ -139,9 +137,9 @@ def make_inventory(seed=7, days=120):
             total_stock = max(5000, int(rng.normal(8200, 1100)))
             ts_rows.append([d, reg, total_stock])
     inv_ts = pd.DataFrame(ts_rows, columns=["date","region","total_stock"])
-    return inv, inv_ts
+    return inv, inv_ts, regions, cats
 
-inventory, inv_ts = make_inventory()
+inventory, inv_ts, REGIONS, CATS = make_inventory()
 
 # =========================
 # HEADER (branding + saludo + reloj)
@@ -163,7 +161,7 @@ with left:
         """,
         unsafe_allow_html=True
     )
-    st.caption("Asistente inteligente para agenda, inventarios, mensajería e insights.")
+    st.caption("Agenda, inventarios, mensajería e insights con explicaciones dinámicas por sección.")
 with right:
     now = datetime.now()
     st.markdown(
@@ -179,26 +177,49 @@ with right:
 st.markdown('<hr class="section"/>', unsafe_allow_html=True)
 
 # =========================
-# SIDEBAR (acciones rápidas + filtros)
+# SIDEBAR (AHORA DINÁMICO: destinatarios + plantillas)
 # =========================
 with st.sidebar:
     st.markdown("### ⚙️ Acciones rápidas")
-    if st.button("📅 Junta mañana 09:00"):
-        schedule_meeting("Junta de seguimiento", date.today()+timedelta(days=1), dt_time(9,0))
-    if st.button("🧾 SDAC: asignar reabasto críticos"):
-        assign_sdac("Reabasto crítico — top 10 SKUs bajo punto de pedido")
-    if st.button("💬 Slack #logistica"):
-        send_slack("logistica", "Se asignó reabasto crítico; verificar CD y tiendas.")
-    if st.button("🟢 WhatsApp supervisor"):
-        send_whatsapp("+52 55 0000 0000", "Recordatorio: revisión de reabasto crítico, 09:00 mañana.")
-    if st.button("✉️ Correo a Dirección"):
-        send_email("agente@empresa.mx","direccion@empresa.mx","Resumen inventarios & agenda",
-                   "Adjunto KPIs, SKUs críticos y calendario de revisión.")
+    # Destinatarios / personalización
+    st.caption("Destinatarios y plantillas")
+    email_to = st.text_input("Correo destino", value="direccion@empresa.mx")
+    slack_channel = st.text_input("Canal Slack (sin #)", value="logistica")
+    wa_to = st.text_input("WhatsApp (tel.)", value="+52 55 0000 0000")
+    plantilla = st.selectbox("Plantilla de mensaje", [
+        "Ejecutivo: resumen + próximas acciones",
+        "Operaciones: reabasto y cobertura",
+        "Comercial: campañas y disponibilidad"
+    ])
+    if plantilla == "Ejecutivo: resumen + próximas acciones":
+        default_msg = "Resumen ejecutivo: SKUs críticos priorizados; junta programada; acciones en SDAC y notificaciones enviadas."
+    elif plantilla == "Operaciones: reabasto y cobertura":
+        default_msg = "Operaciones: reabasto crítico asignado; monitoreo de cobertura diario; validar tiempos de entrega."
+    else:
+        default_msg = "Comercial: coordinar campañas con disponibilidad y ajustar exhibición en tiendas clave."
+    msg_text = st.text_area("Mensaje", value=default_msg, height=120)
+
+    st.markdown("---")
+    st.caption("Acciona con la configuración anterior")
+    colA, colB = st.columns(2, gap="small")
+    with colA:
+        if st.button("✉️ Enviar correo"):
+            send_email("agente@empresa.mx", email_to, "Actualización — Inventarios & Agenda", msg_text)
+    with colB:
+        if st.button("💬 Enviar a Slack"):
+            send_slack(slack_channel, msg_text)
+    colC, colD = st.columns(2, gap="small")
+    with colC:
+        if st.button("🟢 Enviar WhatsApp"):
+            send_whatsapp(wa_to, msg_text)
+    with colD:
+        if st.button("🧾 Crear SDAC (reabasto)"):
+            assign_sdac("Reabasto crítico — priorización por brecha y cobertura")
 
     st.markdown("---")
     st.caption("Filtros inventario")
-    f_region = st.multiselect("Región", sorted(inventory["region"].unique()))
-    f_category = st.multiselect("Categoría", sorted(inventory["category"].unique()))
+    f_region = st.multiselect("Región", REGIONS)
+    f_category = st.multiselect("Categoría", CATS)
     st.caption("Ventana tendencias")
     horizon_days = st.slider("Días", 30, 120, 60, 10)
 
@@ -210,23 +231,45 @@ cut = inv_ts["date"].max() - pd.Timedelta(days=horizon_days-1)
 inv_ts_view = inv_ts[(inv_ts["date"] >= cut) & (inv_ts["region"].isin(f_region) if f_region else inv_ts["region"].notna())]
 
 # =========================
-# EXPANDER: mini guía
+# FUNCIONES DE EXPLICACIÓN (por sección)
 # =========================
-with st.expander("💡 Guía rápida"):
-    st.markdown("""
-- **Agenda & Calendario**: programa reuniones por fecha/hora y visualiza próximos eventos.
-- **Inventarios (SQL Server)**: tabla de SKUs, brechas y exportaciones. Acciones de logística (SDAC).
-- **Mensajería**: enviar/visualizar correos y WhatsApp.
-- **Insights**: gráficos + explicación automática.
-- **Explicaciones LLM**: genera narrativa dinámica (rol, tono, detalle), bullets accionables y resumen ejecutivo.
-- **Notas**: registra pendientes rápidos.
-""")
+def explain_trend(ts_df: pd.DataFrame, regions_sel):
+    if ts_df.empty:
+        return "No hay datos en la ventana seleccionada."
+    change = (ts_df["total_stock"].iloc[-1] - ts_df["total_stock"].iloc[0]) / max(1, ts_df["total_stock"].iloc[0]) * 100
+    region_txt = ", ".join(regions_sel) if regions_sel else "todas las regiones"
+    direction = "alza" if change >= 0 else "baja"
+    return (f"**Tendencia:** el stock total para {region_txt} muestra una variación de **{change:.1f}%** "
+            f"en la ventana de **{horizon_days} días**, con sesgo a la **{direction}**. "
+            "Sugerencia: anticipar reabasto previo a picos semanales y validar lead times.")
+
+def explain_heatmap(hm_df: pd.DataFrame):
+    if hm_df.empty:
+        return "Sin brechas de reabasto en la combinación categoría–región actual."
+    top = hm_df.sort_values("gap_qty", ascending=False).head(1).iloc[0]
+    return (f"**Brecha concentrada:** mayor gap en **{top['category']}** para **{top['region']}**. "
+            "Priorizar asignaciones en esa intersección y ajustar puntos de pedido.")
+
+def explain_treemap(by_cat_df: pd.DataFrame):
+    if by_cat_df.empty:
+        return "No hay categorías con brecha para mostrar."
+    leaders = by_cat_df.head(3)["category"].tolist()
+    return (f"**Top categorías con brecha:** {', '.join(leaders)}. "
+            "Recom: revisar surtido, cobertura objetivo y elasticidad de demanda por categoría.")
+
+def explain_table(inv_df: pd.DataFrame):
+    if inv_df.empty:
+        return "No hay SKUs para revisar con los filtros actuales."
+    below = int(inv_df["below_reorder"].sum())
+    cover = inv_df["days_cover"].mean()
+    return (f"**Estado de SKUs:** {below} elementos por debajo del punto de pedido; "
+            f"cobertura promedio **{cover:.1f} días**. Acciones: reabasto dirigido y ajuste de reorder points.")
 
 # =========================
-# TABS PRINCIPALES
+# TABS
 # =========================
-tab_agenda, tab_invent, tab_msgs, tab_insights, tab_llm, tab_notes, tab_log = st.tabs(
-    ["📅 Agenda", "📦 Inventarios (SQL Server)", "💬 Mensajería", "📊 Insights", "🧠 Explicaciones LLM", "🗒️ Notas", "🗂️ Bitácora"]
+tab_agenda, tab_inv, tab_insights, tab_msgs, tab_log = st.tabs(
+    ["📅 Agenda", "📦 Inventarios (SQL Server)", "📊 Insights", "💬 Mensajería", "🗂️ Bitácora"]
 )
 
 # -------- Agenda
@@ -237,7 +280,7 @@ with tab_agenda:
         mt_title = st.text_input("Título", value="Junta de seguimiento")
         mt_date = st.date_input("Fecha", value=date.today() + timedelta(days=1))
         mt_time = st.time_input("Hora", value=dt_time(9,0))
-        attendees = st.text_input("Invitados (coma separada)", value="direccion@empresa.mx, ops@empresa.mx")
+        attendees = st.text_input("Invitados (coma separada)", value=f"{email_to}, ops@empresa.mx")
         if st.button("➕ Agregar a Google Calendar"):
             schedule_meeting(mt_title, mt_date, mt_time)
     with a2:
@@ -254,8 +297,8 @@ with tab_agenda:
         else:
             st.info("Sin eventos programados.")
 
-# -------- Inventarios (SQL Server)
-with tab_invent:
+# -------- Inventarios (tabla + explicación local)
+with tab_inv:
     i1, i2 = st.columns([1.6, 2.4], gap="large")
     with i1:
         st.markdown('<div class="section-title">Resumen</div>', unsafe_allow_html=True)
@@ -269,170 +312,64 @@ with tab_invent:
         st.markdown('<hr class="section"/>', unsafe_allow_html=True)
         st.markdown("**Acciones operativas**")
         if st.button("🧾 Asignar logística (SDAC) — críticos"):
-            assign_sdac("Reabasto críticos: priorizar CD y tiendas p/ top 10 SKUs")
-        st.download_button("📥 Exportar inventario (CSV)", data=inv_view.to_csv(index=False).encode("utf-8"), file_name="inventario_filtrado.csv")
+            assign_sdac("Reabasto críticos: priorizar CD/tiendas para top SKUs")
+        st.download_button("📥 Exportar inventario (CSV)", data=inv_view.to_csv(index=False).encode("utf-8"),
+                           file_name="inventario_filtrado.csv")
     with i2:
         st.markdown('<div class="section-title">Detalle de inventario</div>', unsafe_allow_html=True)
         st.dataframe(inv_view[["sku","category","region","stock","reorder_point","daily_demand","days_cover"]],
                      hide_index=True, use_container_width=True)
-        st.markdown('<hr class="section"/>', unsafe_allow_html=True)
-        inv_g = inv_view.copy()
-        inv_g["gap_qty"] = (inv_g["reorder_point"] - inv_g["stock"]).clip(lower=0)
-        by_reg = inv_g.groupby("region", as_index=False)["gap_qty"].sum().sort_values("gap_qty", ascending=False)
-        fig_bar = px.bar(by_reg, x="region", y="gap_qty", color="region", color_discrete_sequence=px.colors.qualitative.Prism)
-        fig_bar.update_layout(height=320, margin=dict(l=10,r=10,t=10,b=10), showlegend=False)
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.markdown(f'<div class="explain">{explain_table(inv_view)}</div>', unsafe_allow_html=True)
 
-# -------- Mensajería (Correo & WhatsApp)
-with tab_msgs:
-    st.markdown('<div class="section-title">Bandejas</div>', unsafe_allow_html=True)
-    m1, m2 = st.columns([1,1], gap="large")
-    with m1:
-        st.subheader("Correo")
-        frm = st.text_input("De", value="agente@empresa.mx", key="mail_from")
-        to = st.text_input("Para", value="direccion@empresa.mx", key="mail_to")
-        subject = st.text_input("Asunto", value=f"Resumen — {BRAND_NAME}", key="mail_subj")
-        body = st.text_area("Mensaje", value="Adjunto KPIs, SKUs críticos y agenda de revisión.", key="mail_body", height=160)
-        if st.button("✉️ Enviar correo"):
-            send_email(frm, to, subject, body)
-        st.markdown("**Historial**")
-        if st.session_state.chat_email:
-            dfm = pd.DataFrame(st.session_state.chat_email)
-            st.dataframe(dfm[["ts","to","subject","body"]].rename(columns={"ts":"Hora","to":"Para","subject":"Asunto","body":"Mensaje"}),
-                         hide_index=True, use_container_width=True)
-        else:
-            st.info("Sin correos aún.")
-    with m2:
-        st.subheader("WhatsApp")
-        to_w = st.text_input("Para (tel.)", value="+52 55 0000 0000", key="wa_to")
-        text_w = st.text_area("Mensaje", value="Recordatorio: reunión y reabasto crítico asignado.", key="wa_body", height=160)
-        if st.button("🟢 Enviar WhatsApp"):
-            send_whatsapp(to_w, text_w)
-        st.markdown("**Historial**")
-        if st.session_state.chat_whatsapp:
-            dfw = pd.DataFrame(st.session_state.chat_whatsapp)
-            st.dataframe(dfw.rename(columns={"ts":"Hora","to":"Para","text":"Mensaje"}),
-                         hide_index=True, use_container_width=True)
-        else:
-            st.info("Sin mensajes aún.")
-
-# -------- Insights (tendencias + heatmap + treemap)
+# -------- Insights (3 visuales; cada uno con explicación local justo debajo)
 with tab_insights:
     st.markdown('<div class="section-title">Tendencias y focos</div>', unsafe_allow_html=True)
     c1, c2, c3 = st.columns([2.2, 1.5, 1.3], gap="large")
+
+    # Serie tendencial
     ts = inv_ts_view.groupby("date", as_index=False)["total_stock"].sum()
     fig_ts = px.line(ts, x="date", y="total_stock", markers=True, color_discrete_sequence=[ACCENT])
     fig_ts.update_traces(line=dict(width=3))
     fig_ts.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10))
     c1.plotly_chart(fig_ts, use_container_width=True)
+    c1.markdown(f'<div class="explain">{explain_trend(ts, f_region)}</div>', unsafe_allow_html=True)
 
+    # Heatmap cat-reg
     inv_h = inv_view.copy()
     inv_h["gap_qty"] = (inv_h["reorder_point"] - inv_h["stock"]).clip(lower=0)
     heat = inv_h.groupby(["category","region"], as_index=False)["gap_qty"].sum()
     fig_hm = px.density_heatmap(heat, x="region", y="category", z="gap_qty", color_continuous_scale="Turbo")
     fig_hm.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10))
     c2.plotly_chart(fig_hm, use_container_width=True)
+    c2.markdown(f'<div class="explain">{explain_heatmap(heat)}</div>', unsafe_allow_html=True)
 
+    # Treemap por categoría
     by_cat = inv_h.groupby("category", as_index=False)["gap_qty"].sum().sort_values("gap_qty", ascending=False)
     fig_tree = px.treemap(by_cat, path=["category"], values="gap_qty", color="gap_qty", color_continuous_scale="Magma")
     fig_tree.update_layout(height=360, margin=dict(l=10,r=10,t=10,b=10))
     c3.plotly_chart(fig_tree, use_container_width=True)
+    c3.markdown(f'<div class="explain">{explain_treemap(by_cat)}</div>', unsafe_allow_html=True)
 
-# -------- Explicaciones LLM (dinámicas)
-with tab_llm:
-    st.markdown('<div class="section-title">Narrativa del agente</div>', unsafe_allow_html=True)
-    cA, cB, cC = st.columns([1.1, 1.1, 2.2], gap="large")
-    with cA:
-        role = st.selectbox("Rol destinatario", ["Dirección", "Operaciones & Logística", "Ventas & Comercial", "Finanzas", "TI / Datos"], index=1, key="llm_role")
-        tone = st.selectbox("Tono", ["Ejecutivo", "Técnico", "Persuasivo", "Neutro"], index=0, key="llm_tone")
-    with cB:
-        depth = st.slider("Nivel de detalle", 1, 5, 3, key="llm_depth")
-        bullets = st.checkbox("Bullets accionables", value=True, key="llm_bullets")
-        include_risks = st.checkbox("Incluir riesgos", value=True, key="llm_risks")
-    with cC:
-        st.text_area("Contexto opcional", placeholder="Añade contexto del negocio (campañas, estacionalidad, restricciones)...", key="llm_ctx")
-
-    # Variables para narrativa (derivadas de datos en pantalla)
-    top_cat = by_cat.iloc[0]["category"] if len(by_cat) else "—"
-    top_reg = heat.sort_values("gap_qty", ascending=False).iloc[0]["region"] if len(heat) else "—"
-    kpi_below = int(inv_view["below_reorder"].sum())
-    kpi_cover = inv_view["days_cover"].mean()
-
-    def gen_narrative():
-        intro = f"Resumen para {st.session_state.llm_role} — tono {st.session_state.llm_tone.lower()}."
-        core = (f"Se identifica concentración de brecha en **{top_cat}** con mayor impacto en **{top_reg}**. "
-                f"Actualmente existen **{kpi_below} SKUs** por debajo del punto de pedido; cobertura promedio **{kpi_cover:.1f} días**.")
-        ctx = f" Contexto: {st.session_state.llm_ctx.strip()}" if st.session_state.llm_ctx else ""
-        detail = " Profundizar en reposición anticipada y ajuste de setpoints." if st.session_state.llm_depth >= 3 else ""
-        risks = " Riesgos: quiebres por variabilidad de demanda y lead time." if st.session_state.llm_risks else ""
-        acts = ("- Aumentar inventario objetivo en top categorías/regiones\n"
-                "- Priorizar surtido en tiendas con menor cobertura\n"
-                "- Revisar parámetros de reorden y tiempos de entrega") if st.session_state.llm_bullets else ""
-        return intro + "\n\n" + core + ctx + detail + risks + ("\n\n**Acciones sugeridas**:\n" + acts if acts else "")
-
-    colBtns = st.columns([1,1,1,2], gap="large")
-    with colBtns[0]:
-        if st.button("🧠 Generar explicación"):
-            st.session_state.llm_text = gen_narrative()
-    with colBtns[1]:
-        if st.button("🔁 Regenerar"):
-            st.session_state.llm_text = gen_narrative()
-    with colBtns[2]:
-        if st.button("📄 Resumen ejecutivo"):
-            st.session_state.llm_text = f"Executive brief: {kpi_below} SKUs críticos; foco en {top_cat}/{top_reg}; cobertura {kpi_cover:.1f} días."
-    with colBtns[3]:
-        if st.button("✅ Bullets accionables"):
-            st.session_state.llm_text = ("- Reabasto en {0}/{1}\n- Ajustar reorder points\n- Monitoreo diario cobertura"
-                                         .format(top_cat, top_reg))
-
-    st.markdown('<hr class="section"/>', unsafe_allow_html=True)
-    st.markdown(st.session_state.get("llm_text","_Pulsa “Generar explicación” para crear la narrativa del agente._"))
-
-# -------- Notas (sin botón flotante; CRUD básico)
-with tab_notes:
-    st.markdown('<div class="section-title">Notas rápidas</div>', unsafe_allow_html=True)
-    cols = st.columns([1.6, 1.6, 1], gap="large")
-    with cols[0]:
-        nt_title = st.text_input("Título de nota", value="", key="note_title")
-    with cols[1]:
-        nt_body = st.text_input("Contenido", value="", key="note_body")
-    with cols[2]:
-        if st.button("➕ Guardar nota"):
-            if nt_title.strip():
-                st.session_state.notes.append({
-                    "id": int(datetime.now().timestamp()*1000),
-                    "title": nt_title.strip(),
-                    "body": nt_body.strip(),
-                    "pinned": False,
-                    "done": False,
-                    "ts": datetime.now().strftime("%d/%m %H:%M")
-                })
-                st.toast("Nota guardada")
-
-    if st.session_state.notes:
-        notes_sorted = sorted(st.session_state.notes, key=lambda x: (not x["pinned"], x["done"]))
-        grid = st.columns(3, gap="large")
-        for idx, n in enumerate(notes_sorted):
-            with grid[idx % 3]:
-                st.markdown(f"""
-<div class="card" style="border-left: 4px solid {'#22C55E' if n['done'] else PRIMARY};">
-  <div style="display:flex;justify-content:space-between;align-items:center;">
-    <div style="font-weight:900;">{n['title']}</div>
-    <div style="opacity:.7;font-size:.85rem;">{n['ts']}</div>
-  </div>
-  <div style="opacity:.9;margin-top:6px;">{n['body'] or '<i>(sin contenido)</i>'}</div>
-</div>
-""", unsafe_allow_html=True)
-                c1, c2, c3 = st.columns([1,1,1])
-                if c1.button(("📌 Quitar" if n["pinned"] else "📌 Fijar"), key=f"pin_{n['id']}"):
-                    n["pinned"] = not n["pinned"]
-                if c2.button(("✅ Desmarcar" if n["done"] else "✅ Hecho"), key=f"done_{n['id']}"):
-                    n["done"] = not n["done"]
-                if c3.button("🗑️ Borrar", key=f"del_{n['id']}"):
-                    st.session_state.notes = [x for x in st.session_state.notes if x["id"] != n["id"]]
-                    st.experimental_rerun()
-    else:
-        st.info("Sin notas todavía. Crea la primera arriba 👆")
+# -------- Mensajería (envío + historial)
+with tab_msgs:
+    st.markdown('<div class="section-title">Mensajes enviados desde esta sesión</div>', unsafe_allow_html=True)
+    colm1, colm2 = st.columns(2, gap="large")
+    with colm1:
+        st.subheader("Correo")
+        if st.session_state.chat_email:
+            dfm = pd.DataFrame(st.session_state.chat_email)
+            st.dataframe(dfm[["ts","to","subject","body"]].rename(columns={"ts":"Hora","to":"Para","subject":"Asunto","body":"Mensaje"}),
+                         hide_index=True, use_container_width=True)
+        else:
+            st.info("Sin correos aún.")
+    with colm2:
+        st.subheader("WhatsApp")
+        if st.session_state.chat_whatsapp:
+            dfw = pd.DataFrame(st.session_state.chat_whatsapp)
+            st.dataframe(dfw.rename(columns={"ts":"Hora","to":"Para","text":"Mensaje"}),
+                         hide_index=True, use_container_width=True)
+        else:
+            st.info("Sin mensajes aún.")
 
 # -------- Bitácora
 with tab_log:
@@ -449,6 +386,6 @@ st.markdown(
     f'<span class="pill">Conexiones</span> '
     f'<span class="pill">Ejecución</span> '
     f'<span class="pill">Artefactos</span> '
-    f'<span class="pill">Narrativa</span>',
+    f'<span class="pill">Narrativa por sección</span>',
     unsafe_allow_html=True
 )
